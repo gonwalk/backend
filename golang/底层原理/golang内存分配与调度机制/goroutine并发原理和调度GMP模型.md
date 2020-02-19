@@ -1,0 +1,283 @@
+# 1.进程、线程和协程
+
+## 1.1 进程和线程区别
+
+进程和线程的主要区别（总结）：https://blog.csdn.net/kuangsonghan/article/details/80674777
+
+```
+根本区别：进程是 操作系统 资源分配    的基本单位，
+        而线程是 CPU进行 调度和执行 的基本单位。
+
+在开销方面：每个进程都有独立的代码和数据空间（程序上下文），程序之间的切换会有较大的开销；线程可以看做轻量级的进程，同一类线程共享代码和数据空间，每个线程都有自己独立的运行栈和程序计数器（PC），线程之间切换的开销小。
+
+所处环境：在操作系统中能同时运行多个进程（程序）；而在同一个进程（程序）中有多个线程同时执行（通过CPU调度，在每个时间片中只有一个线程执行）
+
+内存分配方面：系统在运行的时候会为每个进程分配不同的内存空间；而对线程而言，除了CPU外，系统不会为线程分配内存（线程所使用的资源来自其所属进程的资源），线程组之间只能共享资源。
+
+包含关系：没有线程的进程可以看做是单线程的，如果一个进程内有多个线程，则执行过程不是一条线的，而是多条线（线程）共同完成的；线程是进程的一部分，所以线程也被称为轻权进程或者轻量级进程。
+```
+
+## 1.2 线程(Thread)和协程(Coroutine)的定义
+
+进程是操作系统进行资源调度的单位，调用方是OS操作系统；
+线程是CPU进行任务调度和执行的基本单位，调用方是CPU。
+
+【深度知识】GO语言的goroutine并发原理和调度机制：https://www.jianshu.com/p/4afa0679851d
+
+Go语言最大的特色就是从语言层面支持并发（Goroutine），Goroutine是Go中最基本的执行单元。事实上每一个Go程序至少有一个Goroutine：主Goroutine。当程序启动时，它会自动创建。
+
+为了更好理解Goroutine，先看一下线程和协程的概念。
+
+```markdown
+线程（Thread）：有时被称为轻量级进程(Lightweight Process，LWP），是程序执行流的最小单元。
+一个标准的线程由线程ID、当前指令指针(PC）、寄存器集合、堆(heap， 一般由程序员分配释放)
+栈(stack，由编译器自动分配释放 ，存放函数的参数值，局部变量的值等)组成。另外，线程是
+进程中的一个实体，是被系统独立调度和分派的基本单位，线程自己不拥有系统资源，只拥有一点儿
+在运行中必不可少的资源，但它可与同属一个进程的其它线程共享进程所拥有的全部资源。
+
+线程拥有自己独立的栈和共享的堆，共享堆，不共享栈，线程的切换一般也由操作系统调度。
+
+协程（coroutine）：又称微线程与子例程（或者称为函数）一样，协程（coroutine）也是一种
+程序组件。相对子例程而言，协程更为一般和灵活，但在实践中使用没有子例程那样广泛。
+
+和线程类似，共享堆，不共享栈，协程的切换一般由程序员在代码中显式控制。
+它避免了上下文切换的额外开销，兼顾了多线程的优点，简化了高并发程序的复杂。
+
+Goroutine和其他语言的协程（coroutine）在使用方式上类似，但从字面意义上来看不同（一个
+是Goroutine，一个是coroutine），再就是协程是一种协作任务控制机制，在最简单的意义上，
+协程不是并发的，而Goroutine支持并发的。因此Goroutine可以理解为一种Go语言的协程。
+同时它可以运行在一个或多个线程上。
+```
+
+先给个简单实例
+```go
+func loop() {
+    for i := 0; i < ; i++ {
+        fmt.Printf("%d ", i)
+    }
+}
+
+func main() {
+   go loop() // 启动一个goroutine
+    loop()
+}
+```
+
+# 2.Golang调度器
+
+## 2.1 GMP模型含义
+
+Golang GMP调度模型：https://blog.csdn.net/qq_37858332/article/details/100689667
+
+```markdown
+M结构是Machine，系统线程，它由操作系统管理，goroutine就是跑在M之上的；M是一个很大的结构，里面维护小对象内存cache（mcache）、当前执行的goroutine、随机数发生器等等非常多的信息
+P结构是Processor，处理器，它的主要用途就是用来执行goroutine，它维护了一个goroutine队列，即runqueue。Processor的让我们从N:1调度到M:N调度的重要部分。
+G是goroutine实现的核心结构，它包含了栈，指令指针，以及其他对调度goroutine很重要的信息，例如其阻塞的channel。
+```
+Processor的数量是在启动时被设置为环境变量GOMAXPROCS的值，或者通过运行时调度函数GOMAXPROCS()进行设置。Processor数量固定意味着任意时刻只有GOMAXPROCS个线程在运行着go代码
+
+深入Golang调度器之GMP模型：https://www.cnblogs.com/sunsky303/p/9705727.html
+
+## 2.2 线程模型
+
+
+一文摸清 Go 的并发调度模型：https://studygolang.com/articles/20991
+
+在细说 Go 的调度模型之前，先来说说一般意义的线程模型。线程模型一般分三种，
+由用户级线程和操作系统OS级线程的不同对应关系决定的。
+```
+（1）多对一的关系N:1，即全部用户线程都映射到一个OS线程上，
+上下文切换成本最低，但无法利用多核资源；
+
+（2）一对一的关系1:1 , 一个用户线程对应到一个OS线程上，能利用到多核资源，
+但是上下文切换（每个用户线程都需要起一个操作系统级线程）成本较高，这也是Java Hotspot VM的默认实现；
+
+（3）多对多的关系M:N，权衡上面两者方案，既能利用多核资源也能尽可能减少上下文切换成本，
+但是调度算法的实现成本偏高。
+```
+
+
+为什么golang的调度器Go Scheduler需要实现 M:N 的方案？
+```
+线程创建开销大。对于 OS 线程而言，其很多特性均是操作系统给予的，但对于 Go 程序而言，
+其中很多特性可能非必要的。这样一来，如果是 1:1 的方案，那么每次 go func(){...} 
+都需要创建一个 OS 线程，而在创建线程过程中，OS线程里某些 Go 用不上的特性会转化为
+不必要的性能开销，不经济。
+
+减少 Go 垃圾回收的复杂度。依据1:1方案，Go 产生所用用户级线程均交由 OS 直接调度。 
+Go 的垃圾回收器要求在运行时需要停止所有线程，才能使得内存达到稳定一致的状态，
+而 OS 不可能清楚这些，垃圾回收器也不能控制 OS 去阻塞线程。
+
+Go Scheduler 的 M:N 方案出现，就是为了解决上面的问题。
+```
+
+
+# 3.GO并发的实现原理
+一、Go并发模型
+
+Go实现了两种并发形式。第一种是大家普遍认知的：多线程共享内存。其实就是Java或者C++等语言中的多线程开发。另外一种是Go语言特有的，也是Go语言推荐的：CSP（communicating sequential processes）并发模型。
+
+CSP并发模型是在1970年左右提出的概念，属于比较新的概念，不同于传统的多线程通过共享内存来通信，CSP讲究的是“以通信的方式来共享内存”。
+
+请记住下面这句话：
+DO NOT COMMUNICATE BY SHARING MEMORY; INSTEAD, SHARE MEMORY BY COMMUNICATING.
+“不要以共享内存的方式来通信，相反，要通过通信来共享内存。”
+
+普通的线程并发模型，就是像Java、C++、或者Python，他们线程间通信都是通过共享内存的方式来进行的。非常典型的方式就是，在访问共享数据（例如数组、Map、或者某个结构体或对象）的时候，通过锁来访问，因此，在很多时候，衍生出一种方便操作的数据结构，叫做“线程安全的数据结构”。例如Java提供的包”java.util.concurrent”中的数据结构。Go中也实现了传统的线程并发模型。
+
+Go的CSP并发模型，是通过goroutine和channel来实现的。
+
+goroutine 是Go语言中并发的执行单位。有点抽象，其实就是和传统概念上的”线程“类似，可以理解为”线程“。
+channel是Go语言中各个并发结构体(goroutine)之前的通信机制。 通俗的讲，就是各个goroutine之间通信的”管道“，有点类似于Linux中的管道。
+生成一个goroutine的方式非常的简单：Go一下，就生成了。
+
+go f();
+通信机制channel也很方便，传数据用channel <- data，取数据用<-channel。
+
+在通信过程中，传数据channel <- data和取数据<-channel必然会成对出现，因为这边传，那边取，两个goroutine之间才会实现通信。
+
+而且不管传还是取，必阻塞，直到另外的goroutine传或者取为止。
+
+示例如下：
+```go
+package main
+
+import "fmt"
+
+func main() {
+
+   messages := make(chan string)
+
+   go func() { messages <- "ping" }()
+
+   msg := <-messages
+   fmt.Println(msg)
+}
+```
+
+注意 main()本身也是运行了一个goroutine。
+
+messages:= make(chan int) 这样就声明了一个阻塞式的无缓冲的通道
+
+chan 是关键字 代表我要创建一个通道
+
+## GO并发模型的实现原理
+
+原文链接：https://www.jianshu.com/p/4afa0679851d
+
+
+我们先从线程讲起，无论语言层面何种并发模型，到了操作系统层面，一定是以线程的形态存在的。而操作系统根据资源访问权限的不同，体系架构可分为用户空间和内核空间；内核空间主要操作访问CPU资源、I/O资源、内存资源等硬件资源，为上层应用程序提供最基本的基础资源，用户空间呢就是上层应用程序的固定活动空间，用户空间不可以直接访问资源，必须通过“系统调用”、“库函数”或“Shell脚本”来调用内核空间提供的资源。
+
+我们现在的计算机语言，可以狭义的认为是一种“软件”，它们中所谓的“线程”，往往是用户态的线程，和操作系统本身内核态的线程（简称KSE），还是有区别的。
+
+线程模型的实现，可以分为以下几种方式：
+
+### 用户级线程模型
+
+![用户级现场模型](https://upload-images.jianshu.io/upload_images/1190574-21814076326bf301.png?imageMogr2/auto-orient/strip|imageView2/2/w/594/format/webp '用户级现场模型')
+如图所示，多个用户态的线程对应着一个内核线程，程序线程的创建、终止、切换或者同步等线程工作必须自身来完成。它可以做快速的上下文切换。缺点是不能有效利用多核CPU。
+
+### 内核级线程模型
+
+![内核级线程模型](https://upload-images.jianshu.io/upload_images/1190574-72bb5dd79ccc3bde.png?imageMogr2/auto-orient/strip|imageView2/2/w/394/format/webp "内核级线程模型")
+这种模型直接调用操作系统的内核线程，所有线程的创建、终止、切换、同步等操作，都由内核来完成。一个用户态的线程对应一个系统线程，它可以利用多核机制，但上下文切换需要消耗额外的资源。C++就是这种。
+
+
+## 两级线程模型（Go语言的线程模型是一种特殊的两级线程模型--GPM调度模型）
+
+Go语言的线程模型就是一种特殊的两级线程模型--GPM调度模型。
+golang中，自身的用户级线程需要 本身程序 去调度，内核级的线程交给 操作系统内核 去调度。
+
+![两级线程模型](https://upload-images.jianshu.io/upload_images/1190574-4a9b12e466b4e0d5.png?imageMogr2/auto-orient/strip|imageView2/2/w/404/format/webp "两级线程模型")
+
+这种模型是介于用户级线程模型和内核级线程模型之间的一种线程模型。这种模型的实现非常复杂，和内核级线程模型类似，一个进程中可以对应多个内核级线程，但是进程中的线程不和内核线程一一对应；这种线程模型会先创建多个内核级线程，然后用自身的用户级线程去对应创建的多个内核级线程，~自身的用户级线程需要本身程序去调度，内核级的线程交给操作系统内核去调度~。
+
+M个用户线程对应N个系统线程，缺点增加了调度器的实现难度。
+
+Go语言的线程模型就是一种特殊的两级线程模型（GPM调度模型）。
+
+## Go线程实现模型MPG
+M指的是Machine，一个M直接关联了一个内核线程，由操作系统管理。
+P指的是“Processor”，代表了M所需的上下文环境，也是处理用户级代码逻辑的处理器。它负责衔接M和G的调度上下文，将等待执行的G与M对接。
+G指的是Goroutine，其本质上也是一种轻量级的线程。包括了调用栈，重要的调度信息，例如channel等。
+
+P的数量由环境变量中的GOMAXPROCS决定，通常来说它是和核心数对应，例如在4Core的服务器上会启动4个线程。G会有很多个，每个P会将Goroutine从一个就绪的队列中做Pop操作，为了减小锁的竞争，通常情况下每个P会负责一个队列。
+
+三者关系如下图所示：
+
+![GMP三者关系](https://upload-images.jianshu.io/upload_images/1190574-6bff3fbee55dc676.png?imageMogr2/auto-orient/strip|imageView2/2/w/400/format/webp "GMP三者关系")
+
+上面的这个图讲的是两个线程(内核线程)的情况。
+
+一个M会对应一个内核线程，也会连接一个上下文P，一个上下文P相当于一个“处理器”，一个上下文连接一个或者多个Goroutine。为了运行goroutine，线程必须保存上下文。
+
+上下文P(Processor)的数量在启动时设置为GOMAXPROCS环境变量的值或通过运行时函数GOMAXPROCS()。通常情况下，在程序执行期间不会更改。上下文数量固定意味着只有固定数量的线程在任何时候运行Go代码。我们可以使用它来调整Go进程到个人计算机的调用，例如4核PC在4个线程上运行Go代码。
+
+图中P正在执行的Goroutine为蓝色的；处于待执行状态的Goroutine为灰色的，灰色的Goroutine形成了一个队列runqueues。
+
+Go语言里，启动一个goroutine很容易：go function 就行，所以每有一个go语句被执行，待执行的runqueue队列就在其末尾加入一个goroutine，一旦上下文运行goroutine直到调度点，它会从其runqueue中弹出goroutine，设置堆栈和指令指针并开始运行goroutine。
+
+![go中的线程实现模型M:N](https://upload-images.jianshu.io/upload_images/1190574-b58e548fb3c0b069.png?imageMogr2/auto-orient/strip|imageView2/2/w/800/format/webp)
+
+#### 线程阻塞
+当正在运行的goroutine（G0）阻塞的时候，例如进行系统调用，会再创建一个系统线程（M1)，当前的M0线程放弃了它的Processor（P），P转到新的线程中去运行。
+
+
+#### runqueue执行完成
+
+当其中一个Processor的runqueue为空，没有goroutine可以调度，它会从另外一个上下文偷取一半的goroutine。
+
+
+首先创建一个G对象，G对象保存到P本地队列或者是全局队列。P此时去唤醒一个M。P继续执行它的执行序。M寻找是否有空闲的P，如果有则将该G对象移动到它本身。接下来M执行一个调度循环(调用G对象->执行->清理线程→继续找新的Goroutine执行)。
+M执行过程中，随时会发生上下文切换。当发生上线文切换时，需要对执行现场进行保护，以便下次被调度执行时进行现场恢复。Go调度器M的栈保存在G对象上，只需要将M所需要的寄存器(SP、PC等)保存到G对象上就可以实现现场保护。当这些寄存器数据被保护起来，就随时可以做上下文切换了，在中断之前把现场保存起来。如果此时G任务还没有执行完，M可以将任务重新丢到P的任务队列，等待下一次被调度执行。当再次被调度执行时，M通过访问G的vdsoSP、vdsoPC寄存器进行现场恢复(从上次中断位置继续执行)。
+
+原文链接：https://blog.csdn.net/qq_37858332/article/details/100689667
+
+### 抛弃P(Processor)会怎样
+
+你可能会想，为什么一定需要一个上下文，我们能不能直接除去上下文，让Goroutine的runqueues挂到M上呢？答案是不行，需要上下文的目的是，当遇到内核线程阻塞的时候，程序可以直接（自动）放开其他线程。
+
+一个很简单的例子就是系统调用sysall，一个线程肯定不能同时执行代码和系统调用被阻塞，这个时候，此线程M需要放弃当前的上下文环境P，以便可以让其他的Goroutine被调度执行。
+
+![M0中的G0执行syscall过程](https://upload-images.jianshu.io/upload_images/1190574-2746ae1e49834c80.png?imageMogr2/auto-orient/strip|imageView2/2/w/550/format/webp)
+
+如上图左图所示，M0中的G0执行了syscall，然后就创建了一个M1(也有可能来自线程缓存)，（转向右图）然后M0丢弃了P，等待syscall的返回值，M1接受了P，将·继续执行Goroutine队列中的其他Goroutine。
+
+当系统调用syscall结束后，M0会“偷”一个上下文，如果不成功，M0就把它的Gouroutine G0放到一个全局的runqueue中，将自己置于线程缓存中并进入休眠状态。全局runqueue是各个P在运行完自己的本地的Goroutine runqueue后用来拉取新goroutine的地方。P也会周期性的检查这个全局runqueue上的goroutine，否则，全局runqueue上的goroutines可能得不到执行而饿死。
+
+#### 均衡的分配工作
+按照以上的说法，上下文P会定期的检查全局的goroutine 队列中的goroutine，以便自己在消费掉自身Goroutine队列的时候有事可做。假如全局goroutine队列中的goroutine也没了呢？就从其他运行的中的P的runqueue里偷。
+
+每个P中的Goroutine不同导致他们运行的效率和时间也不同，在一个有很多P和M的环境中，不能让一个P跑完自身的Goroutine就没事可做了，因为或许其他的P有很长的goroutine队列要跑，得需要均衡。
+该如何解决呢？
+
+Go的做法倒也直接，从其他P中偷一半！
+
+
+## Goroutine 小结
+
+优点：
+1、开销小
+POSIX的thread API虽然能够提供丰富的API，例如配置自己的CPU亲和性，申请资源等等，线程在得到了很多与进程相同的控制权的同时，开销也非常的大，在Goroutine中则不需这些额外的开销，所以一个Golang的程序中可以支持10w级别的Goroutine。
+
+每个 goroutine (协程) 默认占用内存远比Java、C的线程少（goroutine：2KB ，线程：8MB）
+
+2、调度性能好
+在Golang的程序中，操作系统级别的线程调度，通常不会做出合适的调度决策。例如在GC时，
+内存必须要达到一个一致的状态。在Goroutine机制里，Golang可以控制Goroutine的调度，
+从而在一个合适的时间进行GC。
+
+在应用层的协程，它避免了上下文切换的额外耗费，兼顾了多线程的优点。简化了高并发程序的复杂度。
+
+缺点：
+协程调度机制无法实现公平调度。
+
+5. 参考：
+https://medium.com/@trevor4e/...
+https://i6448038.github.io/20...
+Understanding goroutines versus coroutines
+https://gobyexample.com/channels
+http://morsmachine.dk/go-sche...
+
+
+

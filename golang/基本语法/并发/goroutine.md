@@ -34,3 +34,139 @@ go func(参数列表){      // 参数列表：函数体内的参数变量列表
 ```
 
 在main()函数中创建一个匿名函数并为匿名函数启动goroutine。匿名函数没有参数，代码将并行执行定时打印计数的效果。
+
+
+
+
+## 多并发示例
+
+### Golang 协程顺序打印
+https://blog.csdn.net/qianghaohao/article/details/97007270
+
+（1）两个协程交替打印两个队列
+
+A、B 两个协程分别打印 1、2、3、4 和 A，B，C，D
+实现：定义 A、B 两个 channal，开 A、B 两个协程，A 协程输出[1, 2, 3, 4]、B 协程输出[A, B, C, D]，通过两个独立的 channal 控制顺序，交替输出。
+```
+func main() {
+	A := make(chan bool, 1)
+	B := make(chan bool)
+	Exit := make(chan bool)
+	go func() {
+		s := []int{1, 2, 3, 4}
+		for i := 0; i < len(s); i++ {
+			if ok := <-A; ok {
+				fmt.Println("A: ", s[i])
+				B <- true
+			}
+		}
+	}()
+	go func() {
+		defer func() {
+			close(Exit)
+		}()
+		s := []byte{'A', 'B', 'C', 'D'}
+		for i := 0; i < len(s); i++ {
+			if ok := <-B; ok {
+				fmt.Printf("B: %c\n", s[i])
+				A <- true
+			}
+		}
+	}()
+	A <- true
+	<-Exit
+}
+```
+
+### A、B 两个协程顺序打印 1~20
+
+实现：与上面基本一样，定义 A、B 两个 channal，开 A、B 两个协程，A 协程输出奇数、B 协程输出偶数，通过两个独立的 channal 控制顺序，交替输出。
+```go
+package main
+
+import "fmt"
+
+func main() {
+	A := make(chan bool, 1)
+	B := make(chan bool)
+	Exit := make(chan bool)
+
+	go func() {
+		for i := 1; i <= 10; i++ {
+			if ok := <-A; ok {
+				fmt.Println("A = ", 2*i-1)
+				B <- true
+			}
+		}
+	}()
+	go func() {
+		defer func() {
+			close(Exit)
+		}()
+		for i := 1; i <= 10; i++ {
+			if ok := <-B; ok {
+				fmt.Println("B : ", 2*i)
+				A <- true
+			}
+		}
+	}()
+
+	A <- true
+	<-Exit
+}
+```
+
+### 多个协程顺序打印数字
+
+原文链接：https://blog.csdn.net/jujueduoluo/article/details/80500450
+
+```go
+package main
+
+import (
+	"sync"
+	"fmt"
+	"time"
+)
+
+var (
+	switchFlow chan int
+	wg sync.WaitGroup
+)
+
+func routine(i int, serialNumber int) {
+	time.Sleep(100 * time.Millisecond)
+	loop:
+	for {
+		select {
+		case s := <- switchFlow:
+			if s == serialNumber  {
+				fmt.Println("routine: ", i+1)
+				break loop
+			} else {
+				//fmt.Println("接受到的编号是: ", s)
+				switchFlow <- s
+			}
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	wg.Done()
+	switchFlow <- serialNumber+1
+}
+
+func main() {
+	switchFlow = make(chan int)
+	wg.Add(100)
+	for i := 0; i < 100; i++ {
+		go routine(i, 10+i)
+	}
+	//引爆点
+	switchFlow <- 10
+
+	wg.Wait()
+	close(switchFlow)
+	fmt.Println("程序结束")
+}
+```
+
