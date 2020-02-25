@@ -8,7 +8,11 @@
 这里作者总结了Golang上百道面试题、内存、channel、goroutine、调度器等方面的知识。除此之外，还有中高级程序员必问的相关知识，包括数据库、操作系统、redis、网络、数据结构
 算法、架构设计等。
 
-（2）https://www.cs.usfca.edu/~galles/visualization/
+（2）http://www.topgoer.com/
+
+在这个链接里，作者整理了golang的基础知识、网络编程、并发编程、常用标准库的使用、beego框架、gin框架、微服务、插件库、开源仓库等丰富的资料。
+
+（3）https://www.cs.usfca.edu/~galles/visualization/
 
 这是一个算法的可视化项目，在学习算法或者数据结构的过程中，看到这些动态变化的过程，有助于加深对算法思想的理解。
 
