@@ -113,6 +113,14 @@ Go Scheduler 的 M:N 方案出现，就是为了解决上面的问题。
 
 
 # 3.GO并发的实现原理
+
+golang中，实现并发的主要方式有如下几种：
+```
+goroutine
+channel
+context
+```
+
 一、Go并发模型
 
 Go实现了两种并发形式。第一种是大家普遍认知的：多线程共享内存。其实就是Java或者C++等语言中的多线程开发。另外一种是Go语言特有的，也是Go语言推荐的：CSP（communicating sequential processes）并发模型。
