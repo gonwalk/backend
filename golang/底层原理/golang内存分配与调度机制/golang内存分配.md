@@ -6,6 +6,7 @@
 在讲Golang的内存分配之前，让我们先来看看一般程序的内存分布情况：
 
 ![一般程序内存逻辑分布](https://upload-images.jianshu.io/upload_images/6328562-4df0b8ade52e88fd.png?imageMogr2/auto-orient/strip|imageView2/2/w/640/format/webp)
+
 以上是程序内存的逻辑分类情况。
 
 我们再来看看一般程序的内存的真实(真实逻辑)图:

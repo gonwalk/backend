@@ -1,7 +1,110 @@
 # 1. map
+
+golang中的map是一种数据类型，将键与值绑定到一起，底层是用哈希表实现的，可以快速的通过键找到对应的值。
+
+类型表示：map[keyType][valueType] key一定要是可比较的类型（可以理解为支持==的操作），value可以是任意类型。
+
+初始化：map只能使用make来初始化，声明的时候默认为一个为nil的map，此时进行取值，返回的是对应类型的零值（不存在也是返回零值）。添加元素无任何意义，还会导致运行时错误。向未初始化的map赋值引起 panic: assign to entry in nil map。
+
+map的声明和初始化的方式：
+```go
+m1 := make(map[string]string)       // 先用make声明，再赋值初始化
+m1["phone"] = "123"
+m1["add"] = "beijing"
+m1["age"] = "12"
+
+// 声明与初始化一起进行
+m := map[byte][]string{
+    '2':"abc",
+    '3':"def",
+    '4':"ghi",
+    '5':"jkl",
+    '6':"mno",
+    '7':"pqrs",
+    '8':"tuv",
+    '9':"wxyz",
+}
+```
+
+清空map：对于一个有一定数据的集合 exp，清空的办法就是再次初始化: exp = make(map[string]int)，如果后期不再使用该map，则可以直接：exp= nil 即可，但是如果还需要重复使用，则必须进行make初始化，否则无法为nil的map添加任何内容。
+
+属性：与切片一样，map 是引用类型。当一个 map 赋值给一个新的变量，它们都指向同一个内部数据结构。因此改变其中一个也会反映到另一个。作为形参或返回参数的时候，传递的是地址的拷贝，扩容时也不会改变这个地址，因此改变其中一个值，另一个指向该变量的字典的值也会相应地发生改变。
+```go
+func main() {
+    exp := map[string]int{
+        "steve": 20,
+        "jamie": 80,
+    }
+    fmt.Println("Ori exp", exp)
+    newexp:= exp
+    newexp["steve"] = 18
+    fmt.Println("exp changed", exp)
+}
+
+//Ori age map[steve:20 jamie:80]
+//age changed map[steve:18 jamie:80]
+```
+
+## 1.1 map底层数据结构
+
+go中的数据结构-字典map：https://www.cnblogs.com/33debug/p/11851585.html
+
+Go中的map在可以在 $GOROOT/src/runtime/map.go找到它的实现。哈希表的数据结构中一些关键的域如下所示：
+
+### hmap结构
+
+```go
+type hmap struct {
+    count        int  //元素个数
+    flags        uint8   
+    B            uint8 //扩容常量
+    noverflow    uint16 //溢出 bucket 个数
+    hash0        uint32 //hash 种子
+    buckets      unsafe.Pointer //bucket 数组指针
+    oldbuckets   unsafe.Pointer //扩容时旧的buckets 数组指针
+    nevacuate    uintptr  //扩容搬迁进度
+    extra        *mapextra //记录溢出相关
+}
+
+type bmap struct {
+    tophash        [bucketCnt]uint8  
+    // Followed by bucketCnt keys 
+    //and then bucketan Cnt values  
+    // Followed by overflow pointer.
+}
+```
+说明：每个map的底层都是hmap结构体，它是由若干个描述hmap结构体的元素、数组指针、extra等组成，buckets数组指针指向由若干个bucket组成的数组，其每个bucket里存放的是key-value数据(通常是8个)和overflow字段（指向下一个bmap），每个key插入时会根据hash算法归到同一个bucket中，当一个bucket中的元素超过8个的时候，hmap会使用extra中的overflow来扩展存储key。
+
+![go中map的数据结构](https://img2018.cnblogs.com/blog/1069650/201911/1069650-20191114174802127-585623786.png)
+
+图中len 就是当前map的元素个数，也就是len()返回的值，也是结构体中hmap.count的值。bucket array是指数组指针，指向bucket数组；hash seed是哈希种子；overflow指向下一个bucket。
+
+### map底部三层结构
+
+map的底层主要是由三个结构构成:
+```
+hmap --- map的最外层的数据结构，包括了map的各种基础信息，如：大小count、buckets数组指针等。
+mapextra --- 记录map的额外信息，hmap结构体里的extra指针指向的结构，例如overflow bucket。
+bmap --- 代表bucket，每一个bucket最多放8个kv，最后由一个overflow字段指向下一个bmap，注意key、value、overflow字段都不显示定义，而是通过maptype计算偏移获取的。
+```
+
+　　其中hmap.extra.nextOverflow指向的是预分配的overflow bucket，预分配的用完了那么值就变成nil。
+
+### bmap结构
+
+bmap的详细结构如下
+![bmap结构](https://img2018.cnblogs.com/blog/1069650/201911/1069650-20191114203834314-657349672.png)
+
+
+在map中出现哈希冲突时，首先以bmap为最小粒度挂载，一个bmap累积8个kv之后，就会申请一个新的bmap（overflow bucket）挂在这个bmap的后面形成链表，优先用预分配的overflow bucket，如果预分配的用完了，那么就malloc一个挂上去。这样减少对象数量，减轻管理内存的负担，利于gc。注意golang的map不会shrink，内存只会越用越多，overflow bucket中的key全删了也不会释放。
+
+bmap中所有key存在一块，所有value存在一块，这样做方便内存对齐。当key大于128字节时，bucket的key字段存储的会是指针，指向key的实际内容；value也是一样。
+
+hash值的高8位存储在bucket中的tophash字段。每个桶最多放8个kv对，所以tophash类型是数组[8]uint8。把高八位存储起来，这样不用完整比较key就能过滤掉不符合的key，加快查询速度。实际上当hash值的高八位小于常量minTopHash时，会加上minTopHash，区间[0, minTophash)的值用于特殊标记。查找key时，计算hash值，用hash值的高八位在tophash中查找，有tophash相等的，再去比较key值是否相同。
+
 ## 1.2 map的底层实现
 
-golang中的map采用了HashTable的实现，通过数组+链表实现的。一个哈希表会有一定数量的桶，哈希表将键值对均匀存储到这些桶中。哈希表在存储键值对时，会先用哈希函数把键值转换为哈希值，哈希表先用哈希值的低几位去定位到一个哈希桶，然后再去这个哈希桶中查找这个键。由于键值对总是被捆绑在一起存在，一旦找到了键，就找到了值。go的字典中，每一个键值对都是它的哈希值代表的，字典不会独立存储任何键的键值，但会独立存储他们的哈希值
+golang中的map采用了HashTable的实现，通过数组+链表实现的。一个哈希表会有一定数量的桶，哈希表将键值对均匀存储到这些桶（使用一个指向数组的指针表示）中。哈希表在存储键值对时，会先用哈希函数把键值转换为哈希值，哈希表先用哈希值的低几位去定位到一个哈希桶，然后再去这个哈希桶中查找这个键。由于键值对总是被捆绑在一起存在，一旦找到了键，就找到了值。go的字典中，每一个键值对都是它的哈希值代表的，字典不会独立存储任何键的键值，但会独立存储他们的哈希值
 
 ## 1.3 map的键类型不能是哪些类型
 
