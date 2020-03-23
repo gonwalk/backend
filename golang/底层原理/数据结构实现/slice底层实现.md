@@ -1,19 +1,92 @@
-golang中的runtime包中的数据结构底层实现原理。
+# golang中的runtime包中的数据结构Slice的底层实现
 
 深入解析 Go 中 Slice 底层实现:https://www.jianshu.com/p/030aba2bff41
+
+## 0.切片重点问题总结
+
+### nil切片和空切片的区别
+
+nil 切片被用在很多标准库和内置函数中，描述一个不存在的切片的时候，就需要用到 nil 切片。比如函数在发生异常的时候，返回的切片就是 nil 切片。nil 切片的指针指向 nil。
+
+空切片一般会用来表示一个空的集合。比如数据库查询，一条结果也没有查到，那么就可以返回一个空切片。
+
+```go
+silce := make([]int, 0)         // 空切片
+slice := []int{ }               // 空切片
+```
+
+空切片和 nil 切片的区别在于，空切片指向的地址不是nil，指向的是一个内存地址，但是它没有分配任何内存空间，即底层元素包含0个元素。
+
+最后需要说明的一点是。不管是使用 nil 切片还是空切片，对其调用内置函数 append，len 和 cap 的效果都是一样的。
+
+### 切片扩容策略
+
+Go 中切片扩容的策略是这样的：
+```
+如果切片的容量小于 1024 个元素，扩容的时候就翻倍该容量。
+
+一旦切片中元素个数超过 1024 个元素，那么增长因子就变成 1.25 ，即每次扩容时在原有容量old.cap的基础上增加原来容量的四分之一。
+```
+注意：扩容扩大的容量都是针对原来的容量而言的，而不是针对原来数组的长度而言的。
+
+### append函数对切片的扩容
+
+数组是固定长度的，它们的长度不能动态增加。而切片是动态的，可以使用内置函数 append 添加元素到切片。append 的函数原型为：append(s []T, x ...T) []T。
+
+x …T 表示 append 函数可以接受的参数个数是可变的。这种函数叫做变参函数。
+
+如果切片是建立在数组之上的，而数组本身不能改变长度，那么切片是如何动态改变长度的呢？
+```
+实际发生的情况是，当新元素通过调用 append 函数追加到切片末尾时，如果超出了容量，append 内部会创建一个新的数组。并将原有数组的元素拷贝给这个新的数组，最后返回建立在这个新数组上的切片。这个新切片的容量是旧切片的二倍（如果切片的容量小于1024，当切片中元素个数超出切片的容量时，append 将会在其内部创建新的数组，该数组的大小是原切片容量的 2 倍，最后 append 返回这个数组的全切片，即从 0 到 length - 1 的切片；当元素的个数超过1024个时，再使用append添加，其容量增加原来容量的1/4）。
+```
+
+切片的内存优化：
+```
+切片保留对底层数组的引用。只要切片存在于内存中，数组就不能被垃圾回收。这在内存管理方便可能是值得关注的。假设我们有一个非常大的数组，而我们只需要处理它的一小部分，为此我们创建这个数组的一个切片，并处理这个切片。这里要注意的事情是，数组仍然存在于内存中，因为切片正在引用它。
+
+解决该问题的一个方法是使用 深拷贝copy 函数 func copy(dst, src []T) int 来创建该切片的一个拷贝（使用该方法对dst修改并不会改变src的值，dst相当于是src的一个值拷贝，src保持不变）。这样我们就可以使用这个新的切片，原来的数组可以被垃圾回收。
+```
+
+```go
+package main
+
+import (  
+    "fmt"
+)
+
+func countries() []string {  
+    countries := []string{"USA", "Singapore", "Germany", "India", "Australia"}
+    neededCountries := countries[:len(countries)-2]
+    countriesCpy := make([]string, len(neededCountries))
+    copy(countriesCpy, neededCountries) //copies neededCountries to countriesCpy
+    return countriesCpy
+}
+func main() {  
+    countriesNeeded := countries()
+    fmt.Println(countriesNeeded)
+}
+```
+
+在上面程序中，第 9 行 neededCountries := countries[:len(countries)-2] 创建一个底层数组为 countries 并排除最后两个元素的切片。第 11 行将 neededCountries 拷贝到 countriesCpy 并在下一行返回 countriesCpy。现在数组 countries 其值还是["USA", "Singapore", "Germany", "India", "Australia"]，但可以被垃圾回收，因为 neededCountries 不再被引用。
+
+### 数组与切片
+
+Go 数组是值类型，声明数组变量时必须指定长度。数组的赋值和函数传参操作都会复制整个数组数据，赋值后的新数组或者函数传参的数组变量相当于对原数组的值拷贝，对其进行修改并不会改变原数组的值。传递数组相当于对原数组进行值复制，如果数组很大，就会消耗大量的内存。
+
+Go中切片是引用传递，声明的时候不需要指定长度。用切片传参时，对其进行修改，传递的实参的内容也会被修改。使用切片既可以达到节约内存的目的，也可以达到合理处理好共享内存的问题。比如就算是传入10亿的数组，也只需要在栈上分配一个8个字节的内存给指针就可以了。这样更加高效的利用内存，性能也比数组要好。
 
 
 # 1.go 切片的底层实现
 
 切片是 Go 中的一种基本的数据结构，使用这种结构可以用来管理数据集合。切片的设计想法是由动态数组概念而来，为了开发者可以更加方便的使一个数据结构可以自动增加和减少。但是切片本身并不是动态数据或者数组指针。切片常见的操作有 reslice、append、copy。与此同时，切片还具有可索引，可迭代的优秀特性。
 
-一. 切片和数组
+## 一. 切片和数组
 
 关于切片和数组怎么选择？接下来好好讨论讨论这个问题。
 
-在 Go 中，与 C 数组变量隐式作为指针使用不同，Go 数组是值类型，赋值和函数传参操作都会复制整个数组数据。
+在 Go 中，与 C 数组变量隐式作为指针使用不同，Go 数组是值类型，赋值和函数传参操作都会复制整个数组数据，赋值后的新数组或者函数传参的数组变量相当于对原数组的值拷贝，对其进行修改并不会改变原数组的值。
 
-
+```go
 func main() {
     arrayA := [2]int{100, 200}
     var arrayB [2]int
@@ -29,20 +102,20 @@ func main() {
 func testArray(x [2]int) {
     fmt.Printf("func Array : %p , %v\n", &x, x)
 }
-
+```
 
 打印结果：
 
-
+```
 arrayA : 0xc4200bebf0 , [100 200]
 arrayB : 0xc4200bec00 , [100 200]
 func Array : 0xc4200bec30 , [100 200]
-
+```
 可以看到，三个内存地址都不同，这也就验证了 Go 中数组赋值和函数传参都是值复制的。那这会导致什么问题呢？
 
 假想每次传参都用数组，那么每次数组都要被复制一遍。如果数组大小有 100万，在64位机器上就需要花费大约 800W 字节，即 8MB 内存。这样会消耗掉大量的内存。于是乎有人想到，函数传参用数组的指针。
 
-
+```go
 func main() {
     arrayA := [2]int{100, 200}
     testArrayPoint(&arrayA)   // 1.传数组指针
@@ -55,15 +128,15 @@ func testArrayPoint(x *[]int) {
     fmt.Printf("func Array : %p , %v\n", x, *x)
     (*x)[1] += 100
 }
-
+```
 打印结果：
 
-
+```
 func Array : 0xc4200b0140 , [100 200]
 func Array : 0xc4200b0180 , [100 300]
 arrayA : 0xc4200b0140 , [100 400]
-
-这也就证明了数组指针确实到达了我们想要的效果。现在就算是传入10亿的数组，也只需要再栈上分配一个8个字节的内存给指针就可以了。这样更加高效的利用内存，性能也比之前的好。
+```
+这也就证明了数组指针确实到达了我们想要的效果。现在就算是传入10亿的数组，也只需要在栈上分配一个8个字节的内存给指针就可以了。这样更加高效的利用内存，性能也比之前的好。
 
 不过传指针会有一个弊端，从打印结果可以看到，第一行和第三行指针地址都是同一个，万一原数组的指针指向更改了，那么函数里面的指针指向都会跟着更改。
 
@@ -75,7 +148,7 @@ arrayA : 0xc4200b0140 , [100 400]
 
 但是，依旧有反例。
 
-
+```go
 package main
 
 import "testing"
@@ -107,82 +180,79 @@ func BenchmarkSlice(b *testing.B) {
         slice()
     }
 }
+```
+我们做一次性能测试，并且禁用内联和优化，来观察切片在堆上内存分配的情况。
 
-我们做一次性能测试，并且禁用内联和优化，来观察切片的堆上内存分配的情况。
-
-
+```
   go test -bench . -benchmem -gcflags "-N -l"
-
+```
 输出结果比较“令人意外”：
 
-
+```
 BenchmarkArray-4          500000              3637 ns/op               0 B/op          0 alloc s/op
 BenchmarkSlice-4          300000              4055 ns/op            8192 B/op          1 alloc s/op
-
+```
 解释一下上述结果，在测试 Array 的时候，用的是4核，循环次数是500000，平均每次执行时间是3637 ns，每次执行堆上分配内存总量是0，分配次数也是0 。
 
-而切片的结果就“差”一点，同样也是用的是4核，循环次数是300000，平均每次执行时间是4055 ns，但是每次执行一次，堆上分配内存总量是8192，分配次数也是1 。
+而切片的结果就“差”一点，同样也是用的是4核，循环次数是300000，平均每次执行时间是4055 ns，但是每次执行一次，堆上分配内存总量是8192，分配次数是1 。
 
-这样对比看来，并非所有时候都适合用切片代替数组，因为切片底层数组可能会在堆上分配内存，而且小数组在栈上拷贝的消耗也未必比
-make 消耗大。
+这样对比看来，并非所有时候都适合用切片代替数组，因为切片底层数组可能会在堆上分配内存（当切片中元素个数超过1024是，切片就会扩容，而扩容就会复制原切片中的值，会比较耗时），而且小数组在栈上拷贝的消耗也未必比make 消耗大。
 
-二. 切片的数据结构
+## 二. 切片的数据结构
+
 切片本身并不是动态数组或者数组指针。它内部实现的数据结构通过指针引用底层数组，设定相关属性将数据读写操作限定在指定的区域内。切片本身是一个只读对象，其工作机制类似数组指针的一种封装。
 
-切片（slice）是对数组一个连续片段的引用，所以切片是一个引用类型（因此更类似于 C/C++ 中的数组类型，或者 Python 中的 list 类型）。这个片段可以是整个数组，或者是由起始和终止索引标识的一些项的子集。需要注意的是，终止索引标识的项不包括在切片内。切片提供了一个与指向数组的动态窗口。
+切片（slice）是对数组一个连续片段的引用，所以切片是一个引用类型（因此更类似于 C/C++ 中的数组类型，或者 Python 中的 list 类型）。这个片段可以是整个数组，或者是由起始和终止索引标识的一些项的子集。需要注意的是，终止索引标识的项不包括在切片内。切片提供了一个指向数组的动态窗口。给定项的切片索引可能比相关数组的相同元素的索引小。
 
-给定项的切片索引可能比相关数组的相同元素的索引小。和数组不同的是，切片的长度可以在运行时修改，最小为 0 最大为相关数组的长度：切片是一个长度可变的数组。
+和数组不同的是，切片的长度可以在运行时修改，最小为 0 最大为相关数组的长度：切片是一个长度可变的数组。
 
 Slice 的数据结构定义如下:
-
-
-
+```go
 type slice struct {
     array unsafe.Pointer
     len   int
     cap   int
 }
+```
 
-
-切片的结构体由3部分构成，Pointer 是指向一个数组的指针，len 代表当前切片的长度，cap 是当前切片的容量。cap 总是大于等于 len 的。
-
+切片的结构体由3部分构成，Pointer 是指向一个数组的指针，len 代表当前切片的长度，cap 是当前切片的容量。cap 总是大于等于 len。
 
 如果想从 slice 中得到一块内存地址，可以这样做：
-
-
+```
 s := make([]byte, 200)
 ptr := unsafe.Pointer(&s[0])
-
+```
 如果反过来呢？从 Go 的内存地址中构造一个 slice。
-
-
-
+```go
 var ptr unsafe.Pointer
 var s1 = struct {
-    addr uintptr
+    addr uintptr            // uintptr可以被转化为Pointer，Pointer也可以转换为uintptr
     len int
     cap int
 }{ptr, length, length}
 s := *(*[]byte)(unsafe.Pointer(&s1))
-
-构造一个虚拟的结构体，把 slice 的数据结构拼出来。
+```
+构造一个匿名的结构体，把 slice 的数据结构拼出来。
 
 当然还有更加直接的方法，在 Go 的反射中就存在一个与之对应的数据结构 SliceHeader，我们可以用它来构造一个 slice
 
-
+```go
 var o []byte
 sliceHeader := (*reflect.SliceHeader)((unsafe.Pointer(&o)))
 sliceHeader.Cap = length
 sliceHeader.Len = length
 sliceHeader.Data = uintptr(ptr)
+```
 
-三. 创建切片
+## 三. 创建切片
+
 make 函数允许在运行期动态指定数组长度，绕开了数组类型必须使用编译期常量的限制。
 
 创建切片有两种形式，make 创建切片，空切片。
 
-1. make 和切片字面量
+### 1. make 和切片字面量
 
+```go
 func makeslice(et *_type, len, cap int) slice {
     // 根据切片的数据类型，获取切片的最大容量
     maxElements := maxSliceCap(et.size)
@@ -199,10 +269,10 @@ func makeslice(et *_type, len, cap int) slice {
     // 返回申请好内存的切片的首地址
     return slice{p, len, cap}
 }
-
+```
 还有一个 int64 的版本：
 
-
+```go
 func makeslice64(et *_type, len64, cap64 int64) slice {
     len := int(len64)
     if int64(len) != len64 {
@@ -216,7 +286,7 @@ func makeslice64(et *_type, len64, cap64 int64) slice {
 
     return makeslice(et, len, cap)
 }
-
+```
 实现原理和上面的是一样的，只不过多了把 int64 转换成 int 这一步罢了。
 
 
@@ -230,30 +300,30 @@ func makeslice64(et *_type, len64, cap64 int64) slice {
 
 还有一种简单的字面量创建切片的方法。如上图。上图就 Slice A 创建出了一个 len = 3，cap = 3 的切片。从原数组的第二位元素(0是第一位)开始切，一直切到第四位为止(不包括第五位)。同理，Slice B 创建出了一个 len = 2，cap = 4 的切片。
 
-2. nil 和空切片
+### 2. nil 和空切片
+
 nil 切片和空切片也是常用的。
 
-
 var slice []int
-
 
 nil 切片被用在很多标准库和内置函数中，描述一个不存在的切片的时候，就需要用到 nil 切片。比如函数在发生异常的时候，返回的切片就是 nil 切片。nil 切片的指针指向 nil。
 
 空切片一般会用来表示一个空的集合。比如数据库查询，一条结果也没有查到，那么就可以返回一个空切片。
 
-
-silce := make( []int , 0 )
-slice := []int{ }
-
+```go
+silce := make([]int, 0)         // 空切片
+slice := []int{ }               // 空切片
+```
 
 空切片和 nil 切片的区别在于，空切片指向的地址不是nil，指向的是一个内存地址，但是它没有分配任何内存空间，即底层元素包含0个元素。
 
 最后需要说明的一点是。不管是使用 nil 切片还是空切片，对其调用内置函数 append，len 和 cap 的效果都是一样的。
 
-四. 切片扩容
+## 四. 切片扩容
+
 当一个切片的容量满了，就需要扩容了。怎么扩，策略是什么？
 
-
+```go
 func growslice(et *_type, old slice, cap int) slice {
     if raceenabled {
         callerpc := getcallerpc(unsafe.Pointer(&et))
@@ -339,13 +409,14 @@ func growslice(et *_type, old slice, cap int) slice {
     // 返回最终新切片，容量更新为最新扩容之后的容量
     return slice{p, old.len, newcap}
 }
-
+```
 上述就是扩容的实现。主要需要关注的有两点，一个是扩容时候的策略，还有一个就是扩容是生成全新的内存地址还是在原来的地址后追加。
 
-1. 扩容策略
+### 1. 扩容策略
+
 先看看扩容策略。
 
-
+```go
 func main() {
     slice := []int{10, 20, 30, 40}
     newSlice := append(slice, 50)
@@ -355,19 +426,20 @@ func main() {
     fmt.Printf("After slice = %v, Pointer = %p, len = %d, cap = %d\n", slice, &slice, len(slice), cap(slice))
     fmt.Printf("After newSlice = %v, Pointer = %p, len = %d, cap = %d\n", newSlice, &newSlice, len(newSlice), cap(newSlice))
 }
-
+```
 输出结果：
 
-
+```
 Before slice = [10 20 30 40], Pointer = 0xc4200b0140, len = 4, cap = 4
 Before newSlice = [10 20 30 40 50], Pointer = 0xc4200b0180, len = 5, cap = 8
 After slice = [10 20 30 40], Pointer = 0xc4200b0140, len = 4, cap = 4
 After newSlice = [10 30 30 40 50], Pointer = 0xc4200b0180, len = 5, cap = 8
-
+```
 用图表示出上述过程。
 
 
 从图上我们可以很容易的看出，新的切片和之前的切片已经不同了，因为新的切片更改了一个值，并没有影响到原来的数组，新切片指向的数组是一个全新的数组。并且 cap 容量也发生了变化。这之间究竟发生了什么呢？
+
 
 Go 中切片扩容的策略是这样的：
 
@@ -382,7 +454,7 @@ Go 中切片扩容的策略是这样的：
 
 情况一：
 
-
+```go
 func main() {
     array := [4]int{10, 20, 30, 40}
     slice := array[0:2]
@@ -394,16 +466,16 @@ func main() {
     fmt.Printf("After newSlice = %v, Pointer = %p, len = %d, cap = %d\n", newSlice, &newSlice, len(newSlice), cap(newSlice))
     fmt.Printf("After array = %v\n", array)
 }
-
+```
 打印输出：
 
-
+```
 Before slice = [10 20], Pointer = 0xc4200c0040, len = 2, cap = 4
 Before newSlice = [10 20 50], Pointer = 0xc4200c0060, len = 3, cap = 4
 After slice = [10 30], Pointer = 0xc4200c0040, len = 2, cap = 4
 After newSlice = [10 30 50], Pointer = 0xc4200c0060, len = 3, cap = 4
 After array = [10 30 50 40]
-
+```
 把上述过程用图表示出来，如下图。
 
 
