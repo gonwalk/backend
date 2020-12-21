@@ -449,7 +449,8 @@ Go 中切片扩容的策略是这样的：
 
 注意：扩容扩大的容量都是针对原来的容量而言的，而不是针对原来数组的长度而言的。
 
-2. 新数组 or 老数组 ？
+### 2. 新数组 or 老数组 ？
+
 再谈谈扩容之后的数组一定是新的么？这个不一定，分两种情况。
 
 情况一：
@@ -498,10 +499,10 @@ slice := array[1:2:3]
 
 所以建议尽量避免情况一，尽量使用情况二，避免 bug 产生。
 
-五. 切片拷贝
+## 五. 切片拷贝
+
 Slice 中拷贝方法有2个。
-
-
+```go
 func slicecopy(to, fm slice, width uintptr) int {
     // 如果源切片或者目标切片有一个长度为0，那么就不需要拷贝，直接 return 
     if fm.len == 0 || to.len == 0 {
@@ -540,25 +541,23 @@ func slicecopy(to, fm slice, width uintptr) int {
     }
     return n
 }
-
+```
 
 在这个方法中，slicecopy 方法会把源切片值(即 fm Slice )中的元素复制到目标切片(即 to Slice )中，并返回被复制的元素个数，copy 的两个类型必须一致。slicecopy 方法最终的复制结果取决于较短的那个切片，当较短的切片复制完成，整个复制过程就全部完成了。
 
 
 举个例子，比如：
 
-
+```go
 func main() {
     array := []int{10, 20, 30, 40}
     slice := make([]int, 6)
     n := copy(slice, array)
     fmt.Println(n,slice)
 }
-
+```
 还有一个拷贝的方法，这个方法原理和 slicecopy 方法类似，不在赘述了，注释写在代码里面了。
-
-
-
+```go
 func slicestringcopy(to []byte, fm string) int {
     // 如果源切片或者目标切片有一个长度为0，那么就不需要拷贝，直接 return 
     if len(fm) == 0 || len(to) == 0 {
@@ -583,17 +582,16 @@ func slicestringcopy(to []byte, fm string) int {
     memmove(unsafe.Pointer(&to[0]), stringStructOf(&fm).str, uintptr(n))
     return n
 }
-
+```
 
 再举个例子，比如：
-
-
+```go
 func main() {
     slice := make([]byte, 3)
     n := copy(slice, "abcdef")
     fmt.Println(n,slice)
 }
-
+```
 输出：
 
 
@@ -601,27 +599,26 @@ func main() {
 
 说到拷贝，切片中有一个需要注意的问题。
 
-
+```go
 func main() {
     slice := []int{10, 20, 30, 40}
     for index, value := range slice {
         fmt.Printf("value = %d , value-addr = %x , slice-addr = %x\n", value, &value, &slice[index])
     }
 }
-
+```
 输出：
-
-
+```
 value = 10 , value-addr = c4200aedf8 , slice-addr = c4200b0320
 value = 20 , value-addr = c4200aedf8 , slice-addr = c4200b0328
 value = 30 , value-addr = c4200aedf8 , slice-addr = c4200b0330
 value = 40 , value-addr = c4200aedf8 , slice-addr = c4200b0338
+```
+
+从上面结果我们可以看到，如果用 range 的方式去遍历一个切片，拿到的 value 其实是切片里面的值拷贝。所以每次打印 value 的地址都不变。
 
 
-从上面结果我们可以看到，如果用 range 的方式去遍历一个切片，拿到的 Value 其实是切片里面的值拷贝。所以每次打印 Value 的地址都不变。
-
-
-由于 Value 是值拷贝的，并非引用传递，所以直接改 Value 是达不到更改原切片值的目的的，需要通过 &slice[index] 获取真实的地址。
+由于 value 是值拷贝的，并非引用传递，所以直接改 value 是达不到更改原切片值的目的的，需要通过 &slice[index] 获取真实的地址。
 
 Reference：
 《Go in action》
@@ -634,11 +631,11 @@ Follow: halfrost · GitHub
 Source: https://halfrost.com/go_slice/
 
 
-深入解析 Go 中 Slice 底层实现：https://www.jianshu.com/p/030aba2bff41
 
+# 深入解析 Go 中 Slice 底层实现：https://www.jianshu.com/p/030aba2bff41
 
+## go 数组切片的底层实现
 
-go 数组切片的底层实现
 go的切片也就是所谓的可变数组，当创建的时候，会发现大小只为24，原因就是他本质是一个结构体，存放着3个字段
 ```go
 type arr struct {
